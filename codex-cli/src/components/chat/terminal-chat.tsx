@@ -26,6 +26,7 @@ import HelpOverlay from "../help-overlay.js";
 import HistoryOverlay from "../history-overlay.js";
 import ModelOverlay from "../model-overlay.js";
 import { formatCommandForDisplay } from "@lib/format-command.js";
+import chalk from "chalk";
 import { Box, Text } from "ink";
 import React, { useEffect, useMemo, useState } from "react";
 import { inspect } from "util";
@@ -52,6 +53,7 @@ export default function TerminalChat({
   fullStdout,
 }: Props): React.ReactElement {
   const [model, setModel] = useState<string>(config.model);
+  const [availableModels, setAvailableModels] = useState<Array<string>>([]);
   const [lastResponseId, setLastResponseId] = useState<string | null>(null);
   const [items, setItems] = useState<Array<ResponseItem>>([]);
   const [loading, setLoading] = useState<boolean>(false);
@@ -322,6 +324,7 @@ export default function TerminalChat({
           <ModelOverlay
             currentModel={model}
             hasLastResponse={Boolean(lastResponseId)}
+            setModels={setAvailableModels}
             onSelect={(newModel) => {
               if (isLoggingEnabled()) {
                 log(
@@ -333,6 +336,16 @@ export default function TerminalChat({
               }
               agent?.cancel();
               setLoading(false);
+
+              if(!availableModels.includes(newModel)) {
+                // eslint-disable-next-line no-console
+                console.error(
+                  `\n${chalk.red('Error:')} Model "${chalk.bold(newModel)}" is not available.\n` +
+                  `Available models: ${chalk.green(availableModels.join(', '))}\n`
+                )
+                setOverlayMode("none")
+                return;
+              }
 
               setModel(newModel);
               setLastResponseId((prev) =>
