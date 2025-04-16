@@ -1,4 +1,4 @@
-#!/usr/bin/env -S NODE_OPTIONS=--no-deprecation node
+#!/usr/bin/env node
 
 import type { AppRollout } from "./app";
 import type { CommandConfirmation } from "./utils/agent/agent-loop";
@@ -254,7 +254,7 @@ if (quietMode) {
 const approvalPolicy: ApprovalPolicy =
   cli.flags.fullAuto || cli.flags.approvalMode === "full-auto"
     ? AutoApprovalMode.FULL_AUTO
-    : cli.flags.autoEdit
+    : cli.flags.autoEdit || cli.flags.approvalMode === "auto-edit"
     ? AutoApprovalMode.AUTO_EDIT
     : AutoApprovalMode.SUGGEST;
 
