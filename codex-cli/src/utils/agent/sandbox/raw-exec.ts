@@ -8,6 +8,7 @@ import type {
 } from "child_process";
 
 import { log, isLoggingEnabled } from "../log.js";
+import { adaptCommandForPlatform } from "../platform-commands.js";
 import { spawn } from "child_process";
 import * as os from "os";
 
@@ -23,7 +24,21 @@ export function exec(
   _writableRoots: Array<string>,
   abortSignal?: AbortSignal,
 ): Promise<ExecResult> {
-  const prog = command[0];
+  // Adapt command for the current platform (e.g., convert 'ls' to 'dir' on Windows)
+  const adaptedCommand = adaptCommandForPlatform(command);
+
+  if (
+    isLoggingEnabled() &&
+    JSON.stringify(adaptedCommand) !== JSON.stringify(command)
+  ) {
+    log(
+      `Command adapted for platform: ${command.join(
+        " ",
+      )} -> ${adaptedCommand.join(" ")}`,
+    );
+  }
+
+  const prog = adaptedCommand[0];
   if (typeof prog !== "string") {
     return Promise.resolve({
       stdout: "",
@@ -72,7 +87,7 @@ export function exec(
     detached: true,
   };
 
-  const child: ChildProcess = spawn(prog, command.slice(1), fullOptions);
+  const child: ChildProcess = spawn(prog, adaptedCommand.slice(1), fullOptions);
   // If an AbortSignal is provided, ensure the spawned process is terminated
   // when the signal is triggered so that cancellations propagate down to any
   // long‑running child processes. We default to SIGTERM to give the process a
@@ -122,13 +137,16 @@ export function exec(
       abortSignal.addEventListener("abort", abortHandler, { once: true });
     }
   }
-  if (!child.pid) {
-    return Promise.resolve({
-      stdout: "",
-      stderr: `likely failed because ${prog} could not be found`,
-      exitCode: 1,
-    });
-  }
+  // If spawning the child failed (e.g. the executable could not be found)
+  // `child.pid` will be undefined *and* an `error` event will be emitted on
+  // the ChildProcess instance.  We intentionally do **not** bail out early
+  // here.  Returning prematurely would leave the `error` event without a
+  // listener which – in Node.js – results in an "Unhandled 'error' event"
+  // process‑level exception that crashes the CLI.  Instead we continue with
+  // the normal promise flow below where we are guaranteed to attach both the
+  // `error` and `exit` handlers right away.  Either of those callbacks will
+  // resolve the promise and translate the failure into a regular
+  // ExecResult object so the rest of the agent loop can carry on gracefully.
 
   const stdoutChunks: Array<Buffer> = [];
   const stderrChunks: Array<Buffer> = [];

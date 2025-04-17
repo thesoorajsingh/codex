@@ -1,4 +1,4 @@
-import TextBuffer from "../src/lib/text-buffer.js";
+import TextBuffer from "../src/text-buffer.js";
 import { describe, test, expect } from "vitest";
 
 describe("TextBuffer – word‑wise navigation & deletion", () => {
@@ -82,6 +82,15 @@ describe("TextBuffer – word‑wise navigation & deletion", () => {
     tb.move("wordRight");
     [, col] = tb.getCursor();
     expect(col).toBe(11);
+  });
+
+  test("deleteWordLeft after trailing space only deletes the last word, not the whole line", () => {
+    const tb = new TextBuffer("I want you to refactor my view ");
+    tb.move("end"); // Place caret after the space
+    tb.deleteWordLeft();
+    expect(tb.getText()).toBe("I want you to refactor my ");
+    const [, col] = tb.getCursor();
+    expect(col).toBe("I want you to refactor my ".length);
   });
 
   test("deleteWordLeft removes the previous word and positions the caret correctly", () => {

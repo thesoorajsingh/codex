@@ -1,6 +1,6 @@
 import type { ReviewDecision } from "./review.js";
+import type { ApplyPatchCommand, ApprovalPolicy } from "../../approvals.js";
 import type { AppConfig } from "../config.js";
-import type { ApplyPatchCommand, ApprovalPolicy } from "@lib/approvals.js";
 import type {
   ResponseFunctionToolCall,
   ResponseInputItem,
@@ -21,6 +21,12 @@ import {
 import { handleExecCommand } from "./handle-exec-command.js";
 import { randomUUID } from "node:crypto";
 import OpenAI, { APIConnectionTimeoutError } from "openai";
+
+// Wait time before retrying after rate limit errors (ms).
+const RATE_LIMIT_RETRY_WAIT_MS = parseInt(
+  process.env["OPENAI_RATE_LIMIT_RETRY_WAIT_MS"] || "2500",
+  10,
+);
 
 export type CommandConfirmation = {
   review: ReviewDecision;
@@ -102,6 +108,9 @@ export class AgentLoop {
     if (this.terminated) {
       return;
     }
+
+    // Reset the current stream to allow new requests
+    this.currentStream = null;
     if (isLoggingEnabled()) {
       log(
         `AgentLoop.cancel() invoked – currentStream=${Boolean(
@@ -116,22 +125,16 @@ export class AgentLoop {
     )?.controller?.abort?.();
 
     this.canceled = true;
+
+    // Abort any in-progress tool calls
     this.execAbortController?.abort();
+
+    // Create a new abort controller for future tool calls
+    this.execAbortController = new AbortController();
     if (isLoggingEnabled()) {
       log("AgentLoop.cancel(): execAbortController.abort() called");
     }
 
-    // If we have *not* seen any function_call IDs yet there is nothing that
-    // needs to be satisfied in a follow‑up request.  In that case we clear
-    // the stored lastResponseId so a subsequent run starts a clean turn.
-    if (this.pendingAborts.size === 0) {
-      try {
-        this.onLastResponseId("");
-      } catch {
-        /* ignore */
-      }
-    }
-
     // NOTE: We intentionally do *not* clear `lastResponseId` here.  If the
     // stream produced a `function_call` before the user cancelled, OpenAI now
     // expects a corresponding `function_call_output` that must reference that
@@ -149,11 +152,6 @@ export class AgentLoop {
       }
     }
 
-    // NOTE: We intentionally do *not* clear `lastResponseId` here.  If the
-    // stream produced a `function_call` before the user cancelled, OpenAI now
-    // expects a corresponding `function_call_output` that must reference that
-    // very same response ID.  We therefore keep the ID around so the
-    // follow‑up request can still satisfy the contract.
     this.onLoading(false);
 
     /* Inform the UI that the run was aborted by the user. */
@@ -394,8 +392,10 @@ export class AgentLoop {
       // identified and dropped.
       const thisGeneration = ++this.generation;
 
-      // Reset cancellation flag for a fresh run.
+      // Reset cancellation flag and stream for a fresh run.
       this.canceled = false;
+      this.currentStream = null;
+
       // Create a fresh AbortController for this run so that tool calls from a
       // previous run do not accidentally get signalled.
       this.execAbortController = new AbortController();
@@ -479,8 +479,9 @@ export class AgentLoop {
         }
         // Send request to OpenAI with retry on timeout
         let stream;
+
         // Retry loop for transient errors. Up to MAX_RETRIES attempts.
-        const MAX_RETRIES = 3;
+        const MAX_RETRIES = 5;
         for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
           try {
             let reasoning: Reasoning | undefined;
@@ -562,11 +563,6 @@ export class AgentLoop {
               );
               continue;
             }
-            const isRateLimit =
-              status === 429 ||
-              errCtx.code === "rate_limit_exceeded" ||
-              errCtx.type === "rate_limit_exceeded" ||
-              /rate limit/i.test(errCtx.message ?? "");
 
             const isTooManyTokensError =
               (errCtx.param === "max_tokens" ||
@@ -589,21 +585,64 @@ export class AgentLoop {
               this.onLoading(false);
               return;
             }
+
+            const isRateLimit =
+              status === 429 ||
+              errCtx.code === "rate_limit_exceeded" ||
+              errCtx.type === "rate_limit_exceeded" ||
+              /rate limit/i.test(errCtx.message ?? "");
             if (isRateLimit) {
-              this.onItem({
-                id: `error-${Date.now()}`,
-                type: "message",
-                role: "system",
-                content: [
-                  {
-                    type: "input_text",
-                    text: "⚠️  Rate limit reached while contacting OpenAI. Please wait a moment and try again.",
-                  },
-                ],
-              });
-              this.onLoading(false);
-              return;
+              if (attempt < MAX_RETRIES) {
+                // Exponential backoff: base wait * 2^(attempt-1), or use suggested retry time
+                // if provided.
+                let delayMs = RATE_LIMIT_RETRY_WAIT_MS * 2 ** (attempt - 1);
+
+                // Parse suggested retry time from error message, e.g., "Please try again in 1.3s"
+                const msg = errCtx?.message ?? "";
+                const m = /retry again in ([\d.]+)s/i.exec(msg);
+                if (m && m[1]) {
+                  const suggested = parseFloat(m[1]) * 1000;
+                  if (!Number.isNaN(suggested)) {
+                    delayMs = suggested;
+                  }
+                }
+                log(
+                  `OpenAI rate limit exceeded (attempt ${attempt}/${MAX_RETRIES}), retrying in ${Math.round(
+                    delayMs,
+                  )} ms...`,
+                );
+                // eslint-disable-next-line no-await-in-loop
+                await new Promise((resolve) => setTimeout(resolve, delayMs));
+                continue;
+              } else {
+                // We have exhausted all retry attempts. Surface a message so the user understands
+                // why the request failed and can decide how to proceed (e.g. wait and retry later
+                // or switch to a different model / account).
+
+                const errorDetails = [
+                  `Status: ${status || "unknown"}`,
+                  `Code: ${errCtx.code || "unknown"}`,
+                  `Type: ${errCtx.type || "unknown"}`,
+                  `Message: ${errCtx.message || "unknown"}`,
+                ].join(", ");
+
+                this.onItem({
+                  id: `error-${Date.now()}`,
+                  type: "message",
+                  role: "system",
+                  content: [
+                    {
+                      type: "input_text",
+                      text: `⚠️  Rate limit reached. Error details: ${errorDetails}. Please try again later.`,
+                    },
+                  ],
+                });
+
+                this.onLoading(false);
+                return;
+              }
             }
+
             const isClientError =
               (typeof status === "number" &&
                 status >= 400 &&
@@ -863,6 +902,7 @@ export class AgentLoop {
       //     (e.g. ECONNRESET, ETIMEDOUT …)
       //   • the OpenAI SDK attached an HTTP `status` >= 500 indicating a
       //     server‑side problem.
+      //   • the error is model specific and detected in stream.
       // If matched we emit a single system message to inform the user and
       // resolve gracefully so callers can choose to retry.
       // -------------------------------------------------------------------
@@ -945,6 +985,74 @@ export class AgentLoop {
         return;
       }
 
+      const isInvalidRequestError = () => {
+        if (!err || typeof err !== "object") {
+          return false;
+        }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const e: any = err;
+
+        if (
+          e.type === "invalid_request_error" &&
+          e.code === "model_not_found"
+        ) {
+          return true;
+        }
+
+        if (
+          e.cause &&
+          e.cause.type === "invalid_request_error" &&
+          e.cause.code === "model_not_found"
+        ) {
+          return true;
+        }
+
+        return false;
+      };
+
+      if (isInvalidRequestError()) {
+        try {
+          // Extract request ID and error details from the error object
+
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const e: any = err;
+
+          const reqId =
+            e.request_id ??
+            (e.cause && e.cause.request_id) ??
+            (e.cause && e.cause.requestId);
+
+          const errorDetails = [
+            `Status: ${e.status || (e.cause && e.cause.status) || "unknown"}`,
+            `Code: ${e.code || (e.cause && e.cause.code) || "unknown"}`,
+            `Type: ${e.type || (e.cause && e.cause.type) || "unknown"}`,
+            `Message: ${
+              e.message || (e.cause && e.cause.message) || "unknown"
+            }`,
+          ].join(", ");
+
+          const msgText = `⚠️  OpenAI rejected the request${
+            reqId ? ` (request ID: ${reqId})` : ""
+          }. Error details: ${errorDetails}. Please verify your settings and try again.`;
+
+          this.onItem({
+            id: `error-${Date.now()}`,
+            type: "message",
+            role: "system",
+            content: [
+              {
+                type: "input_text",
+                text: msgText,
+              },
+            ],
+          });
+        } catch {
+          /* best-effort */
+        }
+        this.onLoading(false);
+        return;
+      }
+
       // Re‑throw all other errors so upstream handlers can decide what to do.
       throw err;
     }
@@ -987,7 +1095,7 @@ You can:
 - Apply patches, run commands, and manage user approvals based on policy.
 - Work inside a sandboxed, git-backed workspace with rollback support.
 - Log telemetry so sessions can be replayed or inspected later.
-- More details on your functionally are available at \`codex --help\`
+- More details on your functionality are available at \`codex --help\`
 
 The Codex CLI is open-sourced. Don't confuse yourself with the old Codex language model built by OpenAI many moons ago (this is understandably top of mind for you!). Within this context, Codex refers to the open-source agentic coding interface.
 
@@ -999,7 +1107,7 @@ You MUST adhere to the following criteria when executing the task:
 - Working on the repo(s) in the current environment is allowed, even if they are proprietary.
 - Analyzing code for vulnerabilities is allowed.
 - Showing user code and tool call details is allowed.
-- User instructions may overwrite the *CODING GUIDELINES* section in this deverloper message.
+- User instructions may overwrite the *CODING GUIDELINES* section in this developer message.
 - Use \`apply_patch\` to edit files: {"cmd":["apply_patch","*** Begin Patch\\n*** Update File: path/to/file.py\\n@@ def example():\\n-  pass\\n+  return 123\\n*** End Patch"]}
 - If completing the user's task requires writing or modifying files:
     - Your code and final answer should follow these *CODING GUIDELINES*:
@@ -1015,7 +1123,7 @@ You MUST adhere to the following criteria when executing the task:
             - If pre-commit doesn't work after a few retries, politely inform the user that the pre-commit setup is broken.
         - Once you finish coding, you must
             - Check \`git status\` to sanity check your changes; revert any scratch files or changes.
-            - Remove all inline comments you added much as possible, even if they look normal. Check using \`git diff\`. Inline comments must be generally avoided, unless active maintainers of the repo, after long careful study of the code and the issue, will still misinterpret the code without the comments.
+            - Remove all inline comments you added as much as possible, even if they look normal. Check using \`git diff\`. Inline comments must be generally avoided, unless active maintainers of the repo, after long careful study of the code and the issue, will still misinterpret the code without the comments.
             - Check if you accidentally add copyright or license headers. If so, remove them.
             - Try to run pre-commit if it is available.
             - For smaller tasks, describe in brief bullet points

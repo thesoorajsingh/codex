@@ -1,7 +1,7 @@
 import type { CommandConfirmation } from "./agent-loop.js";
 import type { AppConfig } from "../config.js";
 import type { ExecInput } from "./sandbox/interface.js";
-import type { ApplyPatchCommand, ApprovalPolicy } from "@lib/approvals.js";
+import type { ApplyPatchCommand, ApprovalPolicy } from "../../approvals.js";
 import type { ResponseInputItem } from "openai/resources/responses/responses.mjs";
 
 import { exec, execApplyPatch } from "./exec.js";
@@ -9,8 +9,8 @@ import { isLoggingEnabled, log } from "./log.js";
 import { ReviewDecision } from "./review.js";
 import { FullAutoErrorMode } from "../auto-approval-mode.js";
 import { SandboxType } from "./sandbox/interface.js";
-import { canAutoApprove } from "@lib/approvals.js";
-import { formatCommandForDisplay } from "@lib/format-command.js";
+import { canAutoApprove } from "../../approvals.js";
+import { formatCommandForDisplay } from "../../format-command.js";
 import { access } from "fs/promises";
 
 // ---------------------------------------------------------------------------
@@ -204,11 +204,20 @@ async function execCommand(
   runInSandbox: boolean,
   abortSignal?: AbortSignal,
 ): Promise<ExecCommandSummary> {
+  let { workdir } = execInput;
+  if (workdir) {
+    try {
+      await access(workdir);
+    } catch (e) {
+      log(`EXEC workdir=${workdir} not found, use process.cwd() instead`);
+      workdir = process.cwd();
+    }
+  }
   if (isLoggingEnabled()) {
     if (applyPatchCommand != null) {
       log("EXEC running apply_patch command");
     } else {
-      const { cmd, workdir, timeoutInMillis } = execInput;
+      const { cmd, timeoutInMillis } = execInput;
       // Seconds are a bit easier to read in log messages and most timeouts
       // are specified as multiples of 1000, anyway.
       const timeout =
@@ -248,7 +257,7 @@ async function execCommand(
   };
 }
 
-const isInContainer = async (): Promise<boolean> => {
+const isInLinux = async (): Promise<boolean> => {
   try {
     await access("/proc/1/cgroup");
     return true;
@@ -261,9 +270,17 @@ async function getSandbox(runInSandbox: boolean): Promise<SandboxType> {
   if (runInSandbox) {
     if (process.platform === "darwin") {
       return SandboxType.MACOS_SEATBELT;
-    } else if (await isInContainer()) {
+    } else if (await isInLinux()) {
+      return SandboxType.NONE;
+    } else if (process.platform === "win32") {
+      // On Windows, we don't have a sandbox implementation yet, so we fall back to NONE
+      // instead of throwing an error, which would crash the application
+      log(
+        "WARNING: Sandbox was requested but is not available on Windows. Continuing without sandbox.",
+      );
       return SandboxType.NONE;
     }
+    // For other platforms, still throw an error as before
     throw new Error("Sandbox was mandated, but no sandbox is available!");
   } else {
     return SandboxType.NONE;
