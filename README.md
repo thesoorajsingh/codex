@@ -261,6 +261,13 @@ You can also define custom instructions:
 ## FAQ
 
 <details>
+<summary>OpenAI released a model called Codex in 2021 - is this related?</summary>
+
+In 2021, OpenAI released Codex, an AI system designed to generate code from natural language prompts. That original Codex model was deprecated as of March 2023 and is separate from the CLI tool.
+
+</details>
+
+<details>
 <summary>How do I stop Codex from touching my repo?</summary>
 
 Codex always runs in a **sandbox first**. If a proposed command or file change looks suspicious you can simply answer **n** when prompted and nothing happens to your working tree.
@@ -270,7 +277,7 @@ Codex always runs in a **sandbox first**. If a proposed command or file change l
 <details>
 <summary>Does it work on Windows?</summary>
 
-Not directly, it requires [Linux on Windows (WSL2)](https://learn.microsoft.com/en-us/windows/wsl/install) – Codex is tested on macOS and Linux with Node ≥ 22.
+Not directly. It requires [Windows Subsystem for Linux (WSL2)](https://learn.microsoft.com/en-us/windows/wsl/install) – Codex has been tested on macOS and Linux with Node ≥ 22.
 
 </details>
 
@@ -370,6 +377,21 @@ git push --force-with-lease           # updates the PR
 | GitHub UI only    | Edit the commit message in the PR → add<br>`Signed-off-by: Your Name <email@example.com>` |
 
 The **DCO check** blocks merges until every commit in the PR carries the footer (with squash this is just the one).
+
+### Releasing `codex`
+
+To publish a new version of the CLI, run the release scripts defined in `codex-cli/package.json`:
+
+1. Open the `codex-cli` directory
+2. Make sure you're on a branch like `git checkout -b bump-version`
+3. Bump the version and `CLI_VERSION` to current datetime: `npm run release:version`
+4. Commit the version bump (with DCO sign-off):
+   ```bash
+   git add codex-cli/src/utils/session.ts codex-cli/package.json
+   git commit -s -m "chore(release): codex-cli v$(node -p \"require('./codex-cli/package.json').version\")"
+   ```
+5. Copy README, build, and publish to npm: `npm run release`
+6. Push to branch: `git push origin HEAD`
 
 ---
 
