@@ -10,6 +10,7 @@
 <details>
 <summary><strong>Table&nbsp;of&nbsp;Contents</strong></summary>
 
+- [Experimental Technology Disclaimer](#experimental-technology-disclaimer)
 - [Quickstart](#quickstart)
 - [Why Codex?](#whycodex)
 - [Security Model \& Permissions](#securitymodelpermissions)
@@ -22,6 +23,7 @@
 - [Installation](#installation)
 - [Configuration](#configuration)
 - [FAQ](#faq)
+- [Funding Opportunity](#funding-opportunity)
 - [Contributing](#contributing)
   - [Development workflow](#development-workflow)
   - [Writing high‑impact code changes](#writing-highimpact-code-changes)
@@ -29,15 +31,27 @@
   - [Review process](#review-process)
   - [Community values](#community-values)
   - [Getting help](#getting-help)
-  - [Developer Certificate of Origin (DCO)](#developer-certificate-of-origin-dco)
-    - [How to sign (recommended flow)](#how-to-sign-recommended-flow)
+  - [Contributor License Agreement (CLA)](#contributor-license-agreement-cla)
     - [Quick fixes](#quick-fixes)
+  - [Releasing `codex`](#releasing-codex)
 - [Security \& Responsible AI](#securityresponsibleai)
 - [License](#license)
+- [Zero Data Retention (ZDR) Organization Limitation](#zero-data-retention-zdr-organization-limitation)
 
 </details>
 
 ---
+
+## Experimental Technology Disclaimer
+
+Codex CLI is an experimental project under active development. It is not yet stable, may contain bugs, incomplete features, or undergo breaking changes. We’re building it in the open with the community and welcome:
+
+- Bug reports
+- Feature requests
+- Pull requests
+- Good vibes
+
+Help us improve by filing issues or submitting PRs (see the section below for how to contribute)!
 
 ## Quickstart
 
@@ -49,7 +63,7 @@ npm install -g @openai/codex
 
 Next, set your OpenAI API key as an environment variable:
 
-```bash
+```shell
 export OPENAI_API_KEY="your-api-key-here"
 ```
 
@@ -123,13 +137,12 @@ The hardening mechanism Codex uses depends on your OS:
   - Outbound network is _fully blocked_ by default – even if a child process
     tries to `curl` somewhere it will fail.
 
-- **Linux** – we recommend using Docker for sandboxing, where Codex launches itself inside a **minimal
+- **Linux** – there is no sandboxing by default.
+  We recommend using Docker for sandboxing, where Codex launches itself inside a **minimal
   container image** and mounts your repo _read/write_ at the same path. A
   custom `iptables`/`ipset` firewall script denies all egress except the
   OpenAI API. This gives you deterministic, reproducible runs without needing
-  root on the host. You can read more in [`run_in_container.sh`](./codex-cli/scripts/run_in_container.sh)
-
-Both approaches are _transparent_ to everyday usage – you still run `codex` from your repo root and approve/reject steps as usual.
+  root on the host. You can use the [`run_in_container.sh`](./codex-cli/scripts/run_in_container.sh) script to set up the sandbox.
 
 ---
 
@@ -148,11 +161,12 @@ Both approaches are _transparent_ to everyday usage – you still run `codex` fr
 
 ## CLI Reference
 
-| Command        | Purpose                             | Example                              |
-| -------------- | ----------------------------------- | ------------------------------------ |
-| `codex`        | Interactive REPL                    | `codex`                              |
-| `codex "…"`    | Initial prompt for interactive REPL | `codex "fix lint errors"`            |
-| `codex -q "…"` | Non‑interactive "quiet mode"        | `codex -q --json "explain utils.ts"` |
+| Command                              | Purpose                             | Example                              |
+| ------------------------------------ | ----------------------------------- | ------------------------------------ |
+| `codex`                              | Interactive REPL                    | `codex`                              |
+| `codex "…"`                          | Initial prompt for interactive REPL | `codex "fix lint errors"`            |
+| `codex -q "…"`                       | Non‑interactive "quiet mode"        | `codex -q --json "explain utils.ts"` |
+| `codex completion <bash\|zsh\|fish>` | Print shell completion script       | `codex completion bash`              |
 
 Key flags: `--model/-m`, `--approval-mode/-a`, and `--quiet/-q`.
 
@@ -184,11 +198,19 @@ Run Codex head‑less in pipelines. Example GitHub Action step:
 
 Set `CODEX_QUIET_MODE=1` to silence interactive UI noise.
 
+## Tracing / Verbose Logging
+
+Setting the environment variable `DEBUG=true` prints full API request and response details:
+
+```shell
+DEBUG=true codex
+```
+
 ---
 
 ## Recipes
 
-Below are a few bite‑size examples you can copy‑paste. Replace the text in quotes with your own task.
+Below are a few bite‑size examples you can copy‑paste. Replace the text in quotes with your own task. See the [prompting guide](https://github.com/openai/codex/blob/main/codex-cli/examples/prompting_guide.md) for more tips and usage patterns.
 
 | ✨  | What you type                                                                   | What happens                                                               |
 | --- | ------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
@@ -227,8 +249,11 @@ cd codex/codex-cli
 npm install
 npm run build
 
-# Run the locally‑built CLI directly
+# Get the usage and the options
 node ./dist/cli.js --help
+
+# Run the locally‑built CLI directly
+node ./dist/cli.js
 
 # Or link the command globally for convenience
 npm link
@@ -290,11 +315,45 @@ Any model available with [Responses API](https://platform.openai.com/docs/api-re
 
 ---
 
+## Zero Data Retention (ZDR) Organization Limitation
+
+> **Note:** Codex CLI does **not** currently support OpenAI organizations with [Zero Data Retention (ZDR)](https://platform.openai.com/docs/guides/your-data#zero-data-retention) enabled.
+
+If your OpenAI organization has Zero Data Retention enabled, you may encounter errors such as:
+
+```
+OpenAI rejected the request. Error details: Status: 400, Code: unsupported_parameter, Type: invalid_request_error, Message: 400 Previous response cannot be used for this organization due to Zero Data Retention.
+```
+
+**Why?**
+
+- Codex CLI relies on the Responses API with `store:true` to enable internal reasoning steps.
+- As noted in the [docs](https://platform.openai.com/docs/guides/your-data#responses-api), the Responses API requires a 30-day retention period by default, or when the store parameter is set to true.
+- ZDR organizations cannot use `store:true`, so requests will fail.
+
+**What can I do?**
+
+- If you are part of a ZDR organization, Codex CLI will not work until support is added.
+- We are tracking this limitation and will update the documentation if support becomes available.
+
+---
+
+## Funding Opportunity
+
+We’re excited to launch a **$1 million initiative** supporting open source projects that use Codex CLI and other OpenAI models.
+
+- Grants are awarded in **$25,000** API credit increments.
+- Applications are reviewed **on a rolling basis**.
+
+**Interested? [Apply here](https://openai.com/form/codex-open-source-fund/).**
+
+---
+
 ## Contributing
 
 This project is under active development and the code will likely change pretty significantly. We'll update this message once that's complete!
 
-More broadly We welcome contributions – whether you are opening your very first pull request or you’re a seasoned maintainer. At the same time we care about reliability and long‑term maintainability, so the bar for merging code is intentionally **high**. The guidelines below spell out what “high‑quality” means in practice and should make the whole process transparent and friendly.
+More broadly we welcome contributions – whether you are opening your very first pull request or you’re a seasoned maintainer. At the same time we care about reliability and long‑term maintainability, so the bar for merging code is intentionally **high**. The guidelines below spell out what “high‑quality” means in practice and should make the whole process transparent and friendly.
 
 ### Development workflow
 
@@ -302,7 +361,28 @@ More broadly We welcome contributions – whether you are opening your very firs
 - Keep your changes focused. Multiple unrelated fixes should be opened as separate PRs.
 - Use `npm run test:watch` during development for super‑fast feedback.
 - We use **Vitest** for unit tests, **ESLint** + **Prettier** for style, and **TypeScript** for type‑checking.
-- Make sure all your commits are signed off with `git commit -s ...`, see [Developer Certificate of Origin (DCO)](#developer-certificate-of-origin-dco) for more details.
+- Before pushing, run the full test/type/lint suite:
+
+### Git Hooks with Husky
+
+This project uses [Husky](https://typicode.github.io/husky/) to enforce code quality checks:
+
+- **Pre-commit hook**: Automatically runs lint-staged to format and lint files before committing
+- **Pre-push hook**: Runs tests and type checking before pushing to the remote
+
+These hooks help maintain code quality and prevent pushing code with failing tests. For more details, see [HUSKY.md](./codex-cli/HUSKY.md).
+
+```bash
+npm test && npm run lint && npm run typecheck
+```
+
+- If you have **not** yet signed the Contributor License Agreement (CLA), add a PR comment containing the exact text
+
+  ```text
+  I have read the CLA Document and I hereby sign the CLA
+  ```
+
+  The CLA‑Assistant bot will turn the PR status green once all authors have signed.
 
 ```bash
 # Watch mode (tests rerun on change)
@@ -318,20 +398,15 @@ npm run format:fix
 
 ### Writing high‑impact code changes
 
-1. **Start with an issue.**
-   Open a new one or comment on an existing discussion so we can agree on the solution before code is written.
-2. **Add or update tests.**
-   Every new feature or bug‑fix should come with test coverage that fails before your change and passes afterwards. 100 % coverage is not required, but aim for meaningful assertions.
-3. **Document behaviour.**
-   If your change affects user‑facing behaviour, update the README, inline help (`codex --help`), or relevant example projects.
-4. **Keep commits atomic.**
-   Each commit should compile and the tests should pass. This makes reviews and potential rollbacks easier.
+1. **Start with an issue.** Open a new one or comment on an existing discussion so we can agree on the solution before code is written.
+2. **Add or update tests.** Every new feature or bug‑fix should come with test coverage that fails before your change and passes afterwards. 100 % coverage is not required, but aim for meaningful assertions.
+3. **Document behaviour.** If your change affects user‑facing behaviour, update the README, inline help (`codex --help`), or relevant example projects.
+4. **Keep commits atomic.** Each commit should compile and the tests should pass. This makes reviews and potential rollbacks easier.
 
 ### Opening a pull request
 
 - Fill in the PR template (or include similar information) – **What? Why? How?**
-- Run **all** checks locally (`npm test && npm run lint && npm run typecheck`).
-  CI failures that could have been caught locally slow down the process.
+- Run **all** checks locally (`npm test && npm run lint && npm run typecheck`). CI failures that could have been caught locally slow down the process.
 - Make sure your branch is up‑to‑date with `main` and that you have resolved merge conflicts.
 - Mark the PR as **Ready for review** only when you believe it is in a merge‑able state.
 
@@ -353,21 +428,20 @@ If you run into problems setting up the project, would like feedback on an idea,
 
 Together we can make Codex CLI an incredible tool. **Happy hacking!** :rocket:
 
-### Developer Certificate of Origin (DCO)
+### Contributor License Agreement (CLA)
 
-All commits **must** include a `Signed‑off‑by:` footer.  
-This one‑line self‑certification tells us you wrote the code and can contribute it under the repo’s license.
+All contributors **must** accept the CLA. The process is lightweight:
 
-#### How to sign (recommended flow)
+1. Open your pull request.
+2. Paste the following comment (or reply `recheck` if you’ve signed before):
 
-```bash
-# squash your work into ONE signed commit
-git reset --soft origin/main          # stage all changes
-git commit -s -m "Your concise message"
-git push --force-with-lease           # updates the PR
-```
+   ```text
+   I have read the CLA Document and I hereby sign the CLA
+   ```
 
-> We enforce **squash‑and‑merge only**, so a single signed commit is enough for the whole PR.
+3. The CLA‑Assistant bot records your signature in the repo and marks the status check as passed.
+
+No special Git commands, email attachments, or commit footers required.
 
 #### Quick fixes
 
