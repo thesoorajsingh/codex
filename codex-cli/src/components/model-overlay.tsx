@@ -17,9 +17,7 @@ import React, { useEffect, useState } from "react";
 type Props = {
   currentModel: string;
   hasLastResponse: boolean;
-  setModels: React.Dispatch<
-    React.SetStateAction<Array<string>>
-  >;
+  setModels: React.Dispatch<React.SetStateAction<Array<string>>>;
   onSelect: (model: string) => void;
   onExit: () => void;
 };

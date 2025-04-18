@@ -540,13 +540,17 @@ export default function TerminalChat({
               agent?.cancel();
               setLoading(false);
 
-              if(!availableModels.includes(newModel)) {
+              if (!availableModels.includes(newModel)) {
                 // eslint-disable-next-line no-console
                 console.error(
-                  `\n${chalk.red('Error:')} Model "${chalk.bold(newModel)}" is not available.\n` +
-                  `Available models: ${chalk.green(availableModels.join(', '))}\n`
-                )
-                setOverlayMode("none")
+                  `\n${chalk.red("Error:")} Model "${chalk.bold(
+                    newModel,
+                  )}" is not available.\n` +
+                    `Available models: ${chalk.green(
+                      availableModels.join(", "),
+                    )}\n`,
+                );
+                setOverlayMode("none");
                 return;
               }
 
