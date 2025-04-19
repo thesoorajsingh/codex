@@ -518,6 +518,7 @@ export default function TerminalChat({
               agent.run(inputs, lastResponseId || "");
               return {};
             }}
+            items={items}
           />
         )}
         {overlayMode === "history" && (
